@@ -70,7 +70,12 @@ static int g_mat_log_global_count = 0;
 
 static int g_mat_log_print_one_round = 0;
 
-void* g_mat_addrs[3];
+struct mat_storage_t
+{
+	void* addr;
+	float data[16];
+};
+static mat_storage_t g_mat_storage[3];
 int g_mat_addr_count = 0;
 int g_mat_addr_selected = 0;
 
@@ -116,12 +121,22 @@ D3DXMATRIX *matrix_get_inverse( const float* mat )
 	{
 		return &g_mat_cache_inverse;
 	}
-	memcpy( &g_mat_cache.m[0][0], mat, sizeof( g_mat_cache.m ) );
+
+	const float* source_mat = mat;
+	// check if this mat is one of our stored ones (to use safer data if available)
+	for (int i = 0; i < g_mat_addr_count; i++) {
+		if (g_mat_storage[i].addr == mat) {
+			source_mat = g_mat_storage[i].data;
+			break;
+		}
+	}
+
+	memcpy( &g_mat_cache.m[0][0], source_mat, sizeof( g_mat_cache.m ) );
 	void *tmp = D3DXMatrixInverse(&g_mat_cache_inverse, NULL, &g_mat_cache);
 	if ( tmp == NULL )
 	{
 		char out[145];
-		unsigned int* ptr = (unsigned int*)mat;
+		unsigned int* ptr = (unsigned int*)source_mat;
 		snprintf( out, sizeof( out ), "%x %x %x %x\n%x %x %x %x\n%x %x %x %x\n%x %x %x %x",
 			ptr[0], ptr[1], ptr[2], ptr[3],
 			ptr[4], ptr[5], ptr[6], ptr[7],
@@ -178,10 +193,10 @@ void matrix_detect_process_upload(const float* mat, D3DXMATRIX* detected_model, 
 				logPrintf( "matrix simple (detected flipping)\n" );
 			}
 		}
-		else if (mat == g_mat_addrs[g_mat_addr_selected])
+		else if (mat == g_mat_storage[g_mat_addr_selected].addr)
 		{
 			D3DXMatrixIdentity(detected_model);
-			memcpy(&detected_view->m[0][0], mat, 16*sizeof(float));
+			memcpy(&detected_view->m[0][0], g_mat_storage[g_mat_addr_selected].data, 16*sizeof(float));
 
 			if (g_mat_log_print_one_round & 2)
 			{
@@ -189,11 +204,11 @@ void matrix_detect_process_upload(const float* mat, D3DXMATRIX* detected_model, 
 				matrix_print_s(&detected_view->m[0][0], "detected view ID3");
 			}
 		}
-		else if (mat != g_mat_addrs[g_mat_addr_selected])
+		else if (mat != g_mat_storage[g_mat_addr_selected].addr)
 		{
 			D3DXMATRIX local = D3DXMATRIX(mat);
-			D3DXMatrixMultiply(detected_model, &local, matrix_get_inverse((const float*)(g_mat_addrs[g_mat_addr_selected])));
-			memcpy(&detected_view->m[0][0], g_mat_addrs[g_mat_addr_selected], sizeof(detected_view->m));
+			D3DXMatrixMultiply(detected_model, &local, matrix_get_inverse(g_mat_storage[g_mat_addr_selected].data));
+			memcpy(&detected_view->m[0][0], g_mat_storage[g_mat_addr_selected].data, sizeof(detected_view->m));
 
 			if (g_mat_log_print_one_round & 2)
 			{
@@ -265,17 +280,20 @@ void matrix_detect_process_upload(const float* mat, D3DXMATRIX* detected_model, 
 	bool mat_already_stored = false;
 	for (int i = 0; i < g_mat_addr_count; i++)
 	{
-		if (g_mat_addrs[i] == mat)
+		if (g_mat_storage[i].addr == mat)
 		{
+			// update the data in case it changed at same address
+			memcpy(g_mat_storage[i].data, mat, 64);
 			mat_already_stored = true;
 			break;
 		}
 	}
-	if (!mat_already_stored && g_mat_addr_count < ARRAYSIZE(g_mat_addrs))
+	if (!mat_already_stored && g_mat_addr_count < ARRAYSIZE(g_mat_storage))
 	{
 		bool msg_newDefault = false;
-		g_mat_addrs[g_mat_addr_count] = (void*)mat;
-		if (mat < g_mat_addrs[g_mat_addr_selected])
+		g_mat_storage[g_mat_addr_count].addr = (void*)mat;
+		memcpy(g_mat_storage[g_mat_addr_count].data, mat, 64);
+		if (mat < g_mat_storage[g_mat_addr_selected].addr)
 		{
 			g_mat_addr_selected = g_mat_addr_count;
 			msg_newDefault = true;

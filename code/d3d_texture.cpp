@@ -423,19 +423,19 @@ HRESULT D3DTextureObject :: CopyTextureSubLevel( GLint cubeface, GLint level, GL
 		return hr;
 	} 
 
+	D3DSURFACE_DESC desc;
+	hr = lpRenderTarget->GetDesc(&desc);
+	if (FAILED(hr)) {
+		D3DGlobal.lastError = hr;
+		logPrintf("WARNING: CopyTextureSubLevel: GetDesc failed with error '%s'\n", DXGetErrorString(hr));
+		lpRenderTarget->Release();
+		return hr;
+	}
+
 	if (!D3DGlobal.pSystemMemRT) 
 	{
-		D3DSURFACE_DESC desc;
-
 		// because we don't have a lockable backbuffer we instead copy it off to an image surface
 		// this will also handle translation between different backbuffer formats
-		hr = lpRenderTarget->GetDesc(&desc);
-		if (FAILED(hr)) {
-			D3DGlobal.lastError = hr;
-			logPrintf("WARNING: CopyTextureSubLevel: GetDesc failed with error '%s'\n", DXGetErrorString(hr));
-			lpRenderTarget->Release();
-			return hr;
-		}
 
 		//create offscreen surface that will hold an antialiased screen image
 		hr = D3DGlobal.pDevice->CreateOffscreenPlainSurface( desc.Width, 
@@ -494,7 +494,21 @@ HRESULT D3DTextureObject :: CopyTextureSubLevel( GLint cubeface, GLint level, GL
 	RECT dstrect;
 	D3DLOCKED_RECT dstlockrect;
 
-	y = D3DGlobal.hCurrentMode.Height - (height + y);
+	y = desc.Height - (height + y);
+
+	// Validate bounds
+	if (x < 0 || y < 0 || x + width > (int)desc.Width || y + height > (int)desc.Height) {
+		logPrintf("WARNING: CopyTextureSubLevel: source rectangle out of bounds! (x:%d y:%d w:%d h:%d surface:%dx%d)\n", x, y, width, height, desc.Width, desc.Height);
+		if (lpRenderTarget != D3DGlobal.pSystemMemFB) lpRenderTarget->Release();
+		return E_INVALIDARG;
+	}
+
+	if (xoffset < 0 || yoffset < 0 || xoffset + width > (int)m_width || yoffset + height > (int)m_height) {
+		logPrintf("WARNING: CopyTextureSubLevel: destination rectangle out of bounds! (xoff:%d yoff:%d w:%d h:%d texture:%dx%d)\n", xoffset, yoffset, width, height, m_width, m_height);
+		if (lpRenderTarget != D3DGlobal.pSystemMemFB) lpRenderTarget->Release();
+		return E_INVALIDARG;
+	}
+
 	srcrect.left = x;
 	srcrect.right = x + width;
 	srcrect.top = y;
@@ -534,8 +548,9 @@ HRESULT D3DTextureObject :: CopyTextureSubLevel( GLint cubeface, GLint level, GL
 	}
 
 	//copy pixels flipping vertical
+	int copyWidth = width * m_dstbytes;
 	for (int i = 0; i < height; ++i) {
-		memcpy( (byte*)dstlockrect.pBits + i*dstlockrect.Pitch, (byte*)srclockrect.pBits + (height-1-i)*srclockrect.Pitch, width * 4 );
+		memcpy( (byte*)dstlockrect.pBits + i*dstlockrect.Pitch, (byte*)srclockrect.pBits + (height-1-i)*srclockrect.Pitch, copyWidth );
 	}
 	
 	D3DGlobal.pSystemMemRT->UnlockRect();
@@ -905,7 +920,11 @@ static void D3DTex_LoadSubImage(GLenum target, GLint level, GLint xoffset, GLint
 
 	int currentTMU = D3DState.TextureState.currentTMU;
 	assert(D3DState.TextureState.currentTexture[currentTMU][targetIndex] != nullptr);
-	assert(D3DState.TextureState.currentTexture[currentTMU][targetIndex]->GetD3DTexture() != nullptr);
+	
+	if (D3DState.TextureState.currentTexture[currentTMU][targetIndex]->GetD3DTexture() == nullptr) {
+		// Texture not initialized (e.g. creation failed earlier), ignore sub-update
+		return;
+	}
 
 	if (pixels)
 	{
@@ -1040,7 +1059,10 @@ static void D3DTex_CopySubImage( GLenum target, GLint level, GLint xoffset, GLin
 
 	int currentTMU = D3DState.TextureState.currentTMU;
 	assert(D3DState.TextureState.currentTexture[currentTMU][targetIndex] != nullptr);
-	assert(D3DState.TextureState.currentTexture[currentTMU][targetIndex]->GetD3DTexture() != nullptr);
+	
+	if (D3DState.TextureState.currentTexture[currentTMU][targetIndex]->GetD3DTexture() == nullptr) {
+		return;
+	}
 
 	HRESULT hr = D3DState.TextureState.currentTexture[currentTMU][targetIndex]->CopyTextureSubLevel( cubeFace, level, xoffset, yoffset, x, y, width, height );
 	if (FAILED(hr)) {
@@ -1055,12 +1077,14 @@ static void D3DTex_CopySubImage( GLenum target, GLint level, GLint xoffset, GLin
 //=========================================
 OPENGL_API void WINAPI glDeleteTextures( GLsizei n, const GLuint *textures )
 {
+	if (!textures) return;
 	assert(D3DGlobal.pObjectBuffer != nullptr);
 	HRESULT hr = D3DGlobal.pObjectBuffer->DeleteObjects( D3D_OBJECT_TYPE_TEXTURE, n, textures );
 	if (FAILED(hr)) D3DGlobal.lastError = hr;
 }
 OPENGL_API void WINAPI glGenTextures( GLsizei n, GLuint *textures )
 {
+	if (!textures) return;
 	assert(D3DGlobal.pObjectBuffer != nullptr);
 	HRESULT hr = D3DGlobal.pObjectBuffer->GenObjects( D3D_OBJECT_TYPE_TEXTURE, n, textures );
 	if (FAILED(hr)) D3DGlobal.lastError = hr;

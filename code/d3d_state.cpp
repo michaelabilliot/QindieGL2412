@@ -733,6 +733,8 @@ void D3DState_SetDefaults()
 	D3DState.CurrentState.currentNormal[0] = 0.0f;
 	D3DState.CurrentState.currentNormal[1] = 0.0f;
 	D3DState.CurrentState.currentNormal[2] = 1.0f;
+	D3DState.TextureState.currentTMU = 0;
+	D3DState.ClientTextureState.currentClientTMU = 0;
 	D3DState.TextureState.textureSamplerStateChanged = TRUE;
 	for (int i = 0; i < MAX_D3D_TMU; ++i) {
 		D3DState.CurrentState.currentTexCoord[i][0] = 0.0f;
